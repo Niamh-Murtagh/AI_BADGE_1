@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pink Panic — Neon Maze</title>
+<style>
+:root{--pink:#ff4fbc;--cyan:#44ffe4;--purple:#a476ff;--bg:#09051b}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#281047,var(--bg) 70%);color:white;font-family:Consolas,'Courier New',monospace;display:flex;justify-content:center;align-items:center;padding:18px}.wrap{width:min(96vw,600px);text-align:center}h1{font-size:clamp(25px,6vw,43px);margin:8px 0;color:var(--pink);text-shadow:0 0 18px #ff4fbc;letter-spacing:3px}.tag{color:var(--cyan);font-size:12px;letter-spacing:3px}.hud{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:var(--cyan);margin:14px 0;font-weight:bold;font-size:14px}.stage{position:relative;border:3px solid var(--pink);box-shadow:0 0 25px #ff4fbc66;border-radius:9px;overflow:hidden;background:#0d0824}canvas{display:block;width:100%;height:auto;image-rendering:pixelated}.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#09051bcc;flex-direction:column;gap:14px;padding:20px}.overlay[hidden]{display:none}.overlay h2{font-size:clamp(22px,6vw,34px);color:var(--pink);text-shadow:0 0 16px var(--pink);margin:0}.overlay p{margin:0;color:var(--cyan);line-height:1.5}button{font:700 16px Consolas,'Courier New',monospace;border:2px solid var(--cyan);background:#ff4fbc;color:#170b29;padding:12px 22px;border-radius:7px;cursor:pointer;box-shadow:0 0 13px #ff4fbc88;touch-action:none}button:active{transform:scale(.96)}.instructions{font-size:12px;color:#d9c8f9;margin:13px 0}.pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,53px);gap:6px;justify-content:center;margin:12px auto}.pad button{padding:8px;font-size:23px;background:#271346;color:var(--cyan)}#up{grid-column:2;grid-row:1}#left{grid-column:1;grid-row:2}#down{grid-column:2;grid-row:2}#right{grid-column:3;grid-row:2}.footer{font-size:11px;color:#9e8bbd}
+</style>
+</head>
+<body><main class="wrap"><div class="tag">✦ 1980s ARCADE DREAM ✦</div><h1>💗 PINK PANIC</h1><div class="hud"><span>SCORE <b id="score">0000</b></span><span>LEVEL <b id="level">1</b></span><span>LIVES <b id="lives">♥♥♥</b></span><span>BEST <b id="best">0000</b></span></div><div class="stage"><canvas id="game" width="504" height="504" aria-label="Neon maze game"></canvas><div class="overlay" id="overlay"><h2 id="headline">PINK PANIC!</h2><p id="message">Eat the dots. Dodge the ghosts.<br>Grab the big dots for ghost power!</p><button id="start">START GAME ▶</button></div></div><div class="instructions">ARROW KEYS / WASD TO MOVE • SPACE TO PAUSE</div><div class="pad"><button id="up" aria-label="Up">▲</button><button id="left" aria-label="Left">◀</button><button id="down" aria-label="Down">▼</button><button id="right" aria-label="Right">▶</button></div><div class="footer">Made with ♥ and an unreasonable amount of pink</div></main>
+<script>
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),T=24;
+const $=id=>document.getElementById(id);
+// 21 x 21 maze: every open tile is traversable; spawn is in an open central junction.
+const RAW=[
+'#####################',
+'#.........#.........#',
+'#.###.###.#.###.###.#',
+'#o#.....#...#.....#o#',
+'#.#.###.#####.###.#.#',
+'#...#...........#...#',
+'###.#.###.#.###.#.###',
+'#...#...#.#.#...#...#',
+'#.#####.#.#.#.#####.#',
+'#.......#...#.......#',
+'#.###.#.......#.###.#',
+'#...#.#.......#.#...#',
+'###.#.#.#####.#.#.###',
+'#...#.#...#...#.#...#',
+'#.###.###.#.###.###.#',
+'#o....#.......#....o#',
+'#.###.#.#####.#.###.#',
+'#...#...#...#...#...#',
+'###.###.#.#.###.###.#',
+'#.........#.........#',
+'#####################'];
+if(RAW.length!==21||RAW.some(r=>r.length!==21))throw Error('Invalid maze');
+const DIRS={left:{x:-1,y:0},right:{x:1,y:0},up:{x:0,y:-1},down:{x:0,y:1}};
+let maze,player,ghosts,score=0,level=1,lives=3,best=0,dots=0,mode='menu',powerUntil=0,invulnerableUntil=0,now=0,last=0,acc=0,anim=0;
+try{best=Number(localStorage.getItem('pink-panic-best'))||0}catch(e){};
+function hud(){ $('score').textContent=String(score).padStart(4,'0');$('level').textContent=level;$('lives').textContent='♥'.repeat(Math.max(0,lives));$('best').textContent=String(best).padStart(4,'0') }
+function wall(x,y){return y<0||y>=21||x<0||x>=21||maze[y][x]==='#'}
+function can(x,y,d){return !wall(x+d.x,y+d.y)}
+function resetPositions(){
+ player={x:10,y:10,dir:DIRS.left,want:DIRS.left};
+ ghosts=[{x:9,y:11,color:'#45ffe7',dir:DIRS.right,homeX:9,homeY:11},{x:10,y:11,color:'#ff9c5a',dir:DIRS.left,homeX:10,homeY:11},{x:11,y:11,color:'#b989ff',dir:DIRS.up,homeX:11,homeY:11}];
+ invulnerableUntil=now+1800;
+}
+function buildMaze(){maze=RAW.map(r=>r.split(''));dots=0;for(let y=0;y<21;y++)for(let x=0;x<21;x++)if(maze[y][x]==='.'||maze[y][x]==='o')dots++;resetPositions();for(const p of [player,...ghosts])if(maze[p.y][p.x]==='.'||maze[p.y][p.x]==='o'){maze[p.y][p.x]=' ';dots--}}
+function show(title,message,button){$('headline').textContent=title;$('message').textContent=message;$('start').textContent=button;$('overlay').hidden=false}
+function start(){score=0;level=1;lives=3;powerUntil=0;now=0;acc=0;buildMaze();mode='playing';$('overlay').hidden=true;hud()}
+function nextLevel(){level++;powerUntil=0;buildMaze();hud()}
+function finish(){mode='over';show('GAME OVER','Final score: '+score+' • Best: '+best,'PLAY AGAIN ↻')}
+function setDirection(name){if(mode==='menu'||mode==='over')start();if(mode==='paused')return;player.want=DIRS[name]}
+function eat(){const tile=maze[player.y][player.x];if(tile==='.'||tile==='o'){score+=tile==='o'?50:10;maze[player.y][player.x]=' ';dots--;if(tile==='o')powerUntil=now+6500;if(score>best){best=score;try{localStorage.setItem('pink-panic-best',String(best))}catch(e){}}hud();if(dots===0)nextLevel()}}
+function ghostStep(g){const choices=Object.values(DIRS).filter(d=>can(g.x,g.y,d));if(!choices.length)return;let possible=choices.filter(d=>!(d.x===-g.dir.x&&d.y===-g.dir.y));if(!possible.length)possible=choices;const frightened=now<powerUntil;let chosen;if(Math.random()<.28)chosen=possible[Math.floor(Math.random()*possible.length)];else{const sorted=[...possible].sort((a,b)=>{const da=Math.abs(g.x+a.x-player.x)+Math.abs(g.y+a.y-player.y),db=Math.abs(g.x+b.x-player.x)+Math.abs(g.y+b.y-player.y);return frightened?db-da:da-db});chosen=sorted[0]}g.dir=chosen;g.x+=chosen.x;g.y+=chosen.y}
+function collide(){if(now<invulnerableUntil)return;for(const g of ghosts){if(g.x===player.x&&g.y===player.y){if(now<powerUntil){score+=200;g.x=g.homeX;g.y=g.homeY;hud()}else{lives--;powerUntil=0;hud();if(lives<=0){finish();return}resetPositions();return}}}}
+}
+function tick(){if(mode!=='playing')return;now+=110;anim++;if(can(player.x,player.y,player.want))player.dir=player.want;if(can(player.x,player.y,player.dir)){player.x+=player.dir.x;player.y+=player.dir.y}eat();collide();if(mode!=='playing')return;if(anim%Math.max(1,4-Math.floor(level/3))===0){ghosts.forEach(ghostStep);collide()}}
+function circle(x,y,r,color){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill()}
+function draw(){ctx.fillStyle='#0c0820';ctx.fillRect(0,0,504,504);for(let y=0;y<21;y++)for(let x=0;x<21;x++){const tile=maze[y][x],px=x*T,py=y*T;if(tile==='#'){ctx.fillStyle='#251043';ctx.fillRect(px+1,py+1,T-2,T-2);ctx.strokeStyle='#ff4fbc';ctx.lineWidth=1.5;ctx.shadowColor='#ff4fbc';ctx.shadowBlur=8;ctx.strokeRect(px+3,py+3,T-6,T-6);ctx.shadowBlur=0}else if(tile==='.')circle(px+12,py+12,2.8,'#ffb8e9');else if(tile==='o'){ctx.shadowColor='#44ffe4';ctx.shadowBlur=15;circle(px+12,py+12,6+Math.sin(anim*.5)*1.3,'#44ffe4');ctx.shadowBlur=0}}
+ const blink=now<invulnerableUntil&&Math.floor(anim/2)%2===0;
+ if(player&&!blink){const px=player.x*T+12,py=player.y*T+12;const angle=Math.atan2(player.dir.y,player.dir.x),mouth=.15+Math.abs(Math.sin(anim*.7))*.37;ctx.fillStyle='#ff63c9';ctx.shadowColor='#ff4fbc';ctx.shadowBlur=16;ctx.beginPath();ctx.moveTo(px,py);ctx.arc(px,py,10.5,angle+mouth,angle+Math.PI*2-mouth);ctx.closePath();ctx.fill();ctx.shadowBlur=0}
+ for(const g of ghosts||[]){const x=g.x*T+12,y=g.y*T+12,c=now<powerUntil?'#416aff':g.color;ctx.fillStyle=c;ctx.shadowColor=c;ctx.shadowBlur=11;ctx.beginPath();ctx.arc(x,y-2,9,Math.PI,0);ctx.lineTo(x+9,y+9);ctx.lineTo(x+5,y+5);ctx.lineTo(x+1,y+9);ctx.lineTo(x-3,y+5);ctx.lineTo(x-7,y+9);ctx.lineTo(x-9,y+5);ctx.closePath();ctx.fill();ctx.shadowBlur=0;circle(x-4,y-2,3,'white');circle(x+4,y-2,3,'white');circle(x-3,y-2,1.3,'#150b30');circle(x+5,y-2,1.3,'#150b30')}
+ ctx.fillStyle='#ffffff08';for(let y=0;y<504;y+=4)ctx.fillRect(0,y,504,1)
+}
+function frame(ts){const dt=Math.min(60,ts-last||0);last=ts;if(mode==='playing'){acc+=dt;while(acc>=110){tick();acc-=110}}draw();requestAnimationFrame(frame)}
+window.addEventListener('keydown',e=>{const key=e.key.toLowerCase();const map={arrowup:'up',w:'up',arrowdown:'down',s:'down',arrowleft:'left',a:'left',arrowright:'right',d:'right'};if(map[key]){e.preventDefault();setDirection(map[key])}else if(e.code==='Space'){e.preventDefault();if(mode==='playing'){mode='paused';show('PAUSED','Take a breather!','RESUME ▶')}else if(mode==='paused'){mode='playing';$('overlay').hidden=true}else start()}else if(e.key==='Enter'&&mode!=='playing'){e.preventDefault();if(mode==='paused'){mode='playing';$('overlay').hidden=true}else start()}});
+$('start').addEventListener('click',()=>{if(mode==='paused'){mode='playing';$('overlay').hidden=true}else start()});
+for(const dir of Object.keys(DIRS)){$(dir).addEventListener('pointerdown',e=>{e.preventDefault();setDirection(dir)})}
+window.addEventListener('blur',()=>{if(mode==='playing'){mode='paused';show('PAUSED','Press resume to continue','RESUME ▶')}});
+// Render a visible player and ghosts even before Start is clicked.
+buildMaze();hud();requestAnimationFrame(frame);
+</script></body></html>
